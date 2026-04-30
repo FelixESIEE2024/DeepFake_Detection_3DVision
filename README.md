@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>GeCo: A Differentiable Geometric Consistency Metric for Video Generation</h1>
+<h1>GeCo: Evaluating Geometric Consistency for Video Generation via Motion and Structure</h1>
 
 <a href="https://geco-geoconsistency.github.io/static/paper.pdf" target="_blank" rel="noopener noreferrer">
   <img src="https://img.shields.io/badge/paper-blue" alt="Paper PDF">
