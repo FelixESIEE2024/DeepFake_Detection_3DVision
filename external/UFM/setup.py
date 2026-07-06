@@ -15,7 +15,7 @@ install_requires = [
     "torchvision",
     "torchaudio",
     "numpy",
-    "matplotlib",
+    "matplotlib<3.11",
     "opencv-python",
     "flow_vis",
     "huggingface_hub",

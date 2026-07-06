@@ -18,6 +18,7 @@ for path in paths_to_add:
             sys.path.append(path)
     else:
         print(f"Warning: Dependency path not found: {path}")
+        print()
 
 try:
     from cogvideox import CogVideoXPipeline

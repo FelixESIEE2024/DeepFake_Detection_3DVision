@@ -109,7 +109,7 @@ install_requires = [
     "timm",
     "black",
     "jaxtyping",
-    "matplotlib",
+    "matplotlib<3.11",
     "Pillow",
     "scikit-learn",
     "einops",
@@ -134,7 +134,7 @@ extras_require = {
     "minimal": [
         # Minimal dependencies for basic functionality without PyTorch
         "numpy",
-        "matplotlib",
+        "matplotlib<3.11",
         "Pillow",
         "scikit-learn",
         "einops",

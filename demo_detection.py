@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os, sys
+import time
+from pathlib import Path
 
 base_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(base_path, 'external', 'UFM'))
@@ -12,6 +14,7 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 import imageio 
+from huggingface_hub.constants import HF_HUB_CACHE
 
 from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
@@ -26,6 +29,45 @@ from utils import (
 
 
 def safe_avg(s, c): return s / c.clamp_min(1.0)
+
+def log_step(message):
+    print()
+    print(f"[INFO] {message}")
+    print()
+
+def format_seconds(value):
+    return f"{value:.2f}s"
+
+def model_cache_status(repo_id):
+    cache_root = Path(HF_HUB_CACHE)
+    repo_dir = cache_root / f"models--{repo_id.replace('/', '--')}"
+    if repo_dir.exists():
+        snapshot_dir = repo_dir / "snapshots"
+        snapshot_count = len(list(snapshot_dir.glob("*"))) if snapshot_dir.exists() else 0
+        return f"cache trouve: {repo_dir} ({snapshot_count} snapshot(s))"
+    return f"cache absent: {repo_dir}"
+
+def log_device_details(device, dtype):
+    print("============================================================")
+    print(" Device Check")
+    print("============================================================")
+    print(f"torch.cuda.is_available : {torch.cuda.is_available()}")
+    print(f"Selected device         : {device}")
+    print(f"Compute dtype           : {dtype}")
+    if device == "cuda":
+        print(f"CUDA device count       : {torch.cuda.device_count()}")
+        print(f"Current CUDA device     : {torch.cuda.current_device()}")
+        print(f"GPU name                : {torch.cuda.get_device_name(0)}")
+        print(f"GPU capability          : {torch.cuda.get_device_capability(0)}")
+        probe = torch.ones(1, device=device)
+        print(f"Probe tensor device     : {probe.device}")
+        print(f"GPU memory allocated    : {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+        print(f"GPU memory reserved     : {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+    else:
+        probe = torch.ones(1)
+        print(f"Probe tensor device     : {probe.device}")
+    print("============================================================")
+    print()
 
 def parse_args():
     p = argparse.ArgumentParser(description="Evaluate video consistency using VGGT (structure) and UFM (motion).")
@@ -63,35 +105,91 @@ def parse_args():
     
     return p.parse_args()
 
+
+
+
+
+
+
+
+
 def main():
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if (device=="cuda" and torch.cuda.get_device_capability()[0]>=8) else torch.float32
 
+    if device == "cuda":
+        gpu_name = torch.cuda.get_device_name(0)
+        log_step(f"Le script s'execute sur le GPU : {gpu_name}")
+    else:
+        log_step("Le script s'execute sur le CPU.")
+
+    log_device_details(device, dtype)
+
+    print("============================================================")
+    print(" GeCo Demo Detection")
+    print("============================================================")
+    print(f"Frame path    : {args.frame_path}")
+    print(f"Output dir    : {args.outdir}")
+    print(f"Save mode     : {args.save_mode}")
+    print(f"FPS           : {args.fps}")
+    print(f"Window size   : {args.window_size}")
+    print(f"Window anchor : {args.window_anchor}")
+    print("============================================================")
+    print()
+
+
+
+
     # Load Models
+    log_step(f"Etat du cache VGGT : {model_cache_status('facebook/VGGT-1B')}")
+    log_step("Chargement du modele VGGT...")
+    t0 = time.perf_counter()
     vggt = VGGT.from_pretrained("facebook/VGGT-1B").to(device).eval()
+    log_step(f"VGGT charge en {format_seconds(time.perf_counter() - t0)}")
+    log_step(f"VGGT param device : {next(vggt.parameters()).device}")
+
+    log_step(f"Etat du cache UFM : {model_cache_status('infinity1096/UFM-Base')}")
+    log_step("Chargement du modele UFM...")
+    t0 = time.perf_counter()
     ufm = UniFlowMatchConfidence.from_pretrained("infinity1096/UFM-Base").to(device=device, dtype=torch.float32).eval()
+    log_step(f"UFM charge en {format_seconds(time.perf_counter() - t0)}")
+    log_step(f"UFM param device : {next(ufm.parameters()).device}")
+
+    if device == "cuda":
+        print("============================================================")
+        print(" GPU Memory After Model Load")
+        print("============================================================")
+        print(f"Allocated : {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+        print(f"Reserved  : {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+        print("============================================================")
+        print()
+
+    log_step("Modeles charges avec succes.")
     
     img_dir = args.frame_path
     if not os.path.exists(img_dir):
-        print(f"[ERROR] Path does not exist: {img_dir}")
+        log_step(f"[ERROR] Path does not exist: {img_dir}")
         return
 
     fn = os.path.basename(os.path.normpath(img_dir))
     os.makedirs(args.outdir, exist_ok=True)
+
+
+
 
     with torch.inference_mode():
         exts = {'.png', '.jpg', '.jpeg', '.bmp', '.webp'}
         all_files = sorted([os.path.join(img_dir, f) for f in os.listdir(img_dir) if os.path.splitext(f.lower())[1] in exts])
         
         if not all_files:
-            print(f"[ERROR] No images found in {img_dir}")
+            log_step(f"[ERROR] No images found in {img_dir}")
             return
         
         N = len(all_files)
         K = args.window_size
         
-        print(f"[INFO] {fn}: Processing {N} frames. Window Size: {K}. Anchor: {args.window_anchor}")
+        log_step(f"{fn}: Processing {N} frames. Window Size: {K}. Anchor: {args.window_anchor}")
 
         # --- PREPARE VIDEO WRITERS ---
         mp4_writers = {}
@@ -109,6 +207,7 @@ def main():
         png_outdir = os.path.join(args.outdir, f"{fn}_frames")
         if len(png_keys) > 0:
             os.makedirs(png_outdir, exist_ok=True)
+            log_step(f"Dossier des frames PNG : {png_outdir}")
 
         for k in mp4_keys:
             out_name = f"{fn}_{k}.mp4"
@@ -124,12 +223,28 @@ def main():
             path = os.path.join(args.outdir, out_name)
             gif_writers[k] = imageio.get_writer(path, mode='I', fps=args.fps, loop=0)
 
+        if mp4_keys:
+            log_step(f"Export MP4 active pour : {', '.join(mp4_keys)}")
+        if gif_keys:
+            log_step(f"Export GIF active pour : {', '.join(gif_keys)}")
+
         # --- Processing Loop (Frame by Frame) ---
         img_tmp = load_image_ufm(all_files[0])
         H, W = img_tmp.shape[:2]
+        log_step(f"Resolution detectee : {W}x{H}")
 
-        for global_idx in tqdm(range(N), desc=f"Frames ({fn})"):
+
+
+
+
+
+        for global_idx in range(N):
             
+
+
+
+
+
             # ---------------------------------------------------------
             # 1. SLIDING WINDOW INDEXING
             # Determine the range of frames [start, end) to use as context.
@@ -157,6 +272,9 @@ def main():
                 end_idx = N
                 start_idx = max(0, N - K)
 
+
+
+
             # ---------------------------------------------------------
             # 2. BATCH PREPARATION
             # Construct a batch containing the current frame (Source) 
@@ -166,6 +284,9 @@ def main():
             batch_indices = [global_idx] + neighbor_indices
             batch_files = [all_files[i] for i in batch_indices]
             num_curr = len(batch_files)
+            print()
+            print(f"[FRAME] {global_idx + 1}/{N} | Window: [{start_idx}, {end_idx}) | Neighbors: {len(neighbor_indices)}")
+            print()
 
             # --- RUN MODEL ---
             imgs = load_and_preprocess_images(batch_files, "crop", patch_size=14).to(device)[None]
@@ -182,7 +303,13 @@ def main():
             conf_src = create_confidence_mask_torch(C[0, ..., 0], args.conf_percentile, args.conf_min)
 
             # Compare Src (Index 0) vs All Neighbors
-            for ti in range(1, num_curr):
+            neighbor_progress = tqdm(
+                range(1, num_curr),
+                desc=f"Frame {global_idx + 1}",
+                unit="neighbor",
+                leave=False,
+            )
+            for ti in neighbor_progress:
                 tgt_img = load_image_ufm(batch_files[ti])
                 flow, cov = predict_correspondences(ufm, src_img, tgt_img, "255")
                 ego, mask_rp = rigid_flow_from_camera_motion(D[0], K_cam[[0, ti]], E_cam[[0, ti]])
@@ -261,7 +388,12 @@ def main():
         for writer in mp4_writers.values(): writer.close()
         for writer in gif_writers.values(): writer.close()
         
+        print()
+        print("============================================================")
         print(f"[DONE] {fn}: Saved outputs for mode={args.save_mode}.")
+        print(f"[DONE] Resultats disponibles dans : {args.outdir}")
+        print("============================================================")
+        print()
 
 if __name__ == "__main__":
     main()

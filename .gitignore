@@ -1,0 +1,15 @@
+env
+GeCo\env
+./env
+
+.venv/
+.env/
+
+
+# Editor / notebook noise
+.vscode/
+dataset/
+
+GeCo\examples
+
+.examples/

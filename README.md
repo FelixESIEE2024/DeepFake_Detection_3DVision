@@ -35,31 +35,28 @@ cd GeCo
 conda create -n geco python=3.11 -y
 conda activate geco
 
-# Install UFM dependencies
-cd external/UFM/UniCeption
-pip install -e .
-cd ..
-pip install -e .
+# Install dependencies with clear, sequential pip progress bars
+# This also pins matplotlib to a version compatible with the current demo code.
+python install_deps.py
 
 # Verify UFM installation (Optional)
 # This generates `ufm_output.png` which should match `examples/example_ufm_output.png`
-python uniflowmatch/models/ufm.py
-
-# Install VGGT & GeCo requirements
-cd ../..
-pip install -r requirements.txt
+python external/UFM/uniflowmatch/models/ufm.py
 
 # Install requirements for test time guidance experiment
-pip install -r requirements_guidance.txt
+python install_deps.py --with-guidance
 ```
+
+If you prefer the original manual installation flow, you can still use `pip install -e .` inside `external/UFM/UniCeption` and `external/UFM`, then install the root requirements files. The helper script above simply installs the same dependencies one by one so the terminal output is easier to follow.
 
 ## Detecting Deformation on a Single Video
 Run GeCo on a single video to generate consistency maps (i.e., Motion Map, Structure Map, and Fused Map).
 
 ```bash
-python demo_detection.py \
-  --frame_path examples/deform_house \
-  --outdir examples/results
+python demo_detection.py `
+  --frame_path examples/deform_house `
+  --outdir examples/results `
+  --window_size 2
 ```
 
 ## GeCo-Eval Benchmark
@@ -86,10 +83,18 @@ GeCo-Eval
 This script calculates the aggregate GeCo score for a specific model across all categories.
 
 ```bash
-python GeCo-Eval_evaluation.py \
-  --frames_root path/to/GeCo-Eval/frames \
+python GeCo-Eval_evaluation.py `
+  --frames_root path/to/GeCo-Eval/frames `
   --models Gen_Veo3.1,Gen_SORA2
 ```
+
+
+
+
+
+
+
+
 
 ## Test Time Guidance Experiment
 Run the following command to generate videos with and without guidance:
