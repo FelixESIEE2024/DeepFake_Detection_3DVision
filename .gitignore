@@ -13,3 +13,8 @@ dataset/
 GeCo\examples
 
 .examples/
+
+GeCo\Geco-Eval
+.Geco-Eval/
+
+.pycache/
