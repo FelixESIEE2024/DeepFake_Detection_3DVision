@@ -1,5 +1,0 @@
-clip_id,category,motion,depth,fused
-b1_0,indoor_prompts,0.002381,0.006926,0.004704
-a1_0,object_centric_prompts,0.068459,0.130300,0.118532
-c1_0,outdoor_prompts,0.004041,0.027160,0.016924
-d1_0,stress_test_prompts,0.014151,0.018395,0.017705
