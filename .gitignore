@@ -17,4 +17,6 @@ GeCo\examples
 GeCo\Geco-Eval
 .Geco-Eval/
 
-.pycache/
+._pycache_/
+
+.__pycache__/
