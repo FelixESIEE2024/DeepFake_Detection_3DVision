@@ -24,6 +24,8 @@ import argparse
 import random
 import csv
 import shlex
+import ctypes
+import subprocess
 import numpy as np
 from typing import List, Tuple
 
@@ -116,6 +118,7 @@ def plan_video_sampling(video_dir, model_key, args):
             "window_lengths": [],
             "total_sampled_frames": 0,
             "n_windows": 0,
+            "total_pair_comparisons": 0,
         }
 
     fps_native = float(dic_model_fps[model_key])
@@ -128,6 +131,16 @@ def plan_video_sampling(video_dir, model_key, args):
         max_windows=args.max_windows
     )
 
+    step = max(1, int(args.pair_stride))
+    total_pair_comparisons = 0
+    for w in windows:
+        n = len(w)
+        sampled_targets = len(range(0, n, step))
+        total_pair_comparisons += sum(
+            sampled_targets - (1 if (src % step == 0) else 0)
+            for src in range(n)
+        )
+
     return {
         "all_files": all_files,
         "fps_native": fps_native,
@@ -136,6 +149,7 @@ def plan_video_sampling(video_dir, model_key, args):
         "window_lengths": [len(w) for w in windows],
         "total_sampled_frames": int(sum(len(w) for w in windows)),
         "n_windows": len(windows),
+        "total_pair_comparisons": int(total_pair_comparisons),
         "win_sec_eff": win_sec_eff,
     }
 
@@ -144,6 +158,7 @@ def print_run_configuration(args, model_keys, suffixes, tasks, task_plans, devic
     total_raw_frames = sum(len(plan["all_files"]) for plan in task_plans.values())
     total_windows = sum(plan["n_windows"] for plan in task_plans.values())
     total_sampled_frames = sum(plan["total_sampled_frames"] for plan in task_plans.values())
+    total_pair_comparisons = sum(plan["total_pair_comparisons"] for plan in task_plans.values())
 
     print("\n" + "=" * 80)
     print("GeCo Evaluation Run")
@@ -160,13 +175,13 @@ def print_run_configuration(args, model_keys, suffixes, tasks, task_plans, devic
     print(f"  frame par seconde         : {args.eval_fps}")
     print(f"  pair_stride      : {args.pair_stride}")
     print(f"  output_dir       : {args.output_dir}")
-    print(f"  save_frame_details : {args.save_frame_details}")
     print("")
 
     print("Planned workload")
     print(f"  nb de videos            : {len(tasks)}")
     print(f"  nb de windows en tout  : {total_windows}")
     print(f"  nb d'iteration total   : {total_sampled_frames}")
+    print(f"  nb comparaison source target total : {total_pair_comparisons}")
     print("=" * 80 + "\n")
 
 
@@ -177,6 +192,7 @@ def print_clip_header(clip_idx, total_clips, model_key, cat, clip_id, clip_plan)
         f"raw={len(clip_plan['all_files'])}  "
         f"sampled={clip_plan['total_sampled_frames']}  "
         f"windows={clip_plan['n_windows']}  "
+        f"comparaisons_src_tgt={clip_plan['total_pair_comparisons']}  "
         f"native_fps={clip_plan['fps_native']:.2f}  "
         f"eval_fps={clip_plan['eval_fps_eff']:.2f}"
     )
@@ -201,9 +217,22 @@ def write_csv_rows(path, fieldnames, rows):
             writer.writerow(row)
 
 
+def get_process_command_line() -> str:
+    """
+    Return the command line to persist in 00_commande.txt.
+    We normalize only the launcher token to `python` and keep the actual
+    process arguments as seen by Python.
+    """
+    try:
+        argv = ["python", *sys.argv]
+        return subprocess.list2cmdline(argv)
+    except Exception:
+        return " ".join(["python", *sys.argv])
+
+
 def write_command_file(output_dir):
     command_path = os.path.join(output_dir, "00_commande.txt")
-    command_str = " ".join(shlex.quote(arg) for arg in [sys.executable] + sys.argv)
+    command_str = get_process_command_line()
     with open(command_path, "w", encoding="utf-8") as f:
         f.write(command_str + "\n")
 
@@ -455,18 +484,22 @@ def parse_args():
 
 def main():
     args = parse_args()
+    print("[Init] Arguments parses.", flush=True)
 
     # 1. Resolve Models
+    print("[Init] Resolution de la liste des modeles...", flush=True)
     if len(args.models) == 1 and args.models[0].lower() == "all":
         model_keys = sorted([m for m in dic_model_fps.keys() if os.path.isdir(os.path.join(args.frames_root, m))])
     else:
         model_keys = args.models
 
     # 2. Resolve Suffixes
+    print("[Init] Resolution des suffixes...", flush=True)
     suffixes_arg = [s.lower() for s in args.suffixes]
     suffixes = None if (len(suffixes_arg) == 1 and suffixes_arg[0] == "all") else suffixes_arg
 
     # 3. Build Task List
+    print("[Init] Scan des clips a evaluer...", flush=True)
     tasks = []
     for model_key in model_keys:
         for cat in args.categories:
@@ -479,18 +512,26 @@ def main():
         print("No clips found matching criteria.")
         return
 
+    print(f"[Init] {len(tasks)} clip(s) trouves. Construction du plan d'echantillonnage...", flush=True)
     task_plans = {}
-    for (model_key, cat, clip_id, video_dir) in tasks:
+    for task_idx, (model_key, cat, clip_id, video_dir) in enumerate(tasks, start=1):
+        print(
+            f"[Init] Planning clip {task_idx}/{len(tasks)} : {model_key} / {cat} / {clip_id}",
+            flush=True
+        )
         task_plans[(model_key, cat, clip_id)] = plan_video_sampling(video_dir, model_key, args)
 
     # 4. Load Models
+    print("[Init] Detection du device et du dtype...", flush=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     compute_dtype = torch.bfloat16 if (device.type == "cuda" and torch.cuda.get_device_capability()[0] >= 8) else torch.float32
 
     print_run_configuration(args, model_keys, suffixes, tasks, task_plans, device, compute_dtype)
-    print("\n Loading models...")
+    print("[Init] Chargement du modele VGGT...", flush=True)
     vggt_model = VGGT.from_pretrained("facebook/VGGT-1B").to(device).eval()
+    print("[Init] VGGT charge. Chargement du modele UFM...", flush=True)
     ufm_model  = UniFlowMatchConfidence.from_pretrained("infinity1096/UFM-Base").to(dtype=torch.float32, device=device).eval()
+    print("[Init] UFM charge. Debut de l'evaluation.", flush=True)
     print("=" * 80 + "\n")
     # 5. Run Evaluation
     per_model_category = {}
@@ -530,6 +571,7 @@ def main():
             "raw_frames": len(clip_plan["all_files"]),
             "sampled_frames": clip_plan["total_sampled_frames"],
             "n_windows": clip_plan["n_windows"],
+            "pair_comparisons": clip_plan["total_pair_comparisons"],
             "motion": m,
             "depth": d,
             "fused": f,
@@ -576,6 +618,7 @@ def main():
     total_raw_frames = sum(len(plan["all_files"]) for plan in task_plans.values())
     total_windows = sum(plan["n_windows"] for plan in task_plans.values())
     total_sampled_frames = sum(plan["total_sampled_frames"] for plan in task_plans.values())
+    total_pair_comparisons = sum(plan["total_pair_comparisons"] for plan in task_plans.values())
 
     run_config_rows = [{
         "frames_root": args.frames_root,
@@ -597,6 +640,7 @@ def main():
         "raw_frames": total_raw_frames,
         "sampled_windows": total_windows,
         "sampled_frames": total_sampled_frames,
+        "pair_comparisons": total_pair_comparisons,
     }]
 
     category_summary_rows = []
@@ -622,7 +666,7 @@ def main():
             "frames_root", "models", "categories", "suffixes", "win_sec", "max_windows",
             "eval_fps", "pair_stride", "covis_thresh", "conf_percentile", "conf_min",
             "tau_z", "ufm_longside", "output_dir", "save_frame_details", "n_clips",
-            "raw_frames", "sampled_windows", "sampled_frames"
+            "raw_frames", "sampled_windows", "sampled_frames", "pair_comparisons"
         ],
         run_config_rows,
     )
@@ -643,7 +687,7 @@ def main():
         os.path.join(args.output_dir, "03_clip_summary.csv"),
         [
             "model_key", "category", "clip_id", "raw_frames", "sampled_frames",
-            "n_windows", "motion", "depth", "fused"
+            "n_windows", "pair_comparisons", "motion", "depth", "fused"
         ],
         [{
             **row,

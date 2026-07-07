@@ -1,2 +1,0 @@
-frames_root,models,categories,suffixes,win_sec,max_windows,eval_fps,pair_stride,covis_thresh,conf_percentile,conf_min,tau_z,ufm_longside,output_dir,save_frame_details,n_clips,raw_frames,sampled_windows,sampled_frames
-C:\Users\conqu\Videos\Detection_Deep_Fake\final_Implentation\GeCo\Geco-Eval,Gen_CogVideoX_2b,object_centric_prompts,all,2.0,2,4.0,1,0.5,20.0,0.2,0.02,255,C:\Users\conqu\Videos\Detection_Deep_Fake\final_Implentation\geco\geco_csv3,True,2,48,2,12

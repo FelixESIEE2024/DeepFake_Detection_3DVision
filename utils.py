@@ -174,6 +174,10 @@ def vggt_infer(
             }
 
 
+
+#####################################################################################################
+
+#FLOW RIGIDE ERROR
 def predict_correspondences(ufm_model, source_image, target_image, value_range="01"):
     """
     Runs the UFM model to predict 2D Optical Flow and Covisibility.
@@ -287,7 +291,7 @@ def rigid_flow_from_camera_motion(
     flow = torch.where(valid.unsqueeze(-1), flow, torch.zeros_like(flow))
 
     return flow, valid
-
+#####################################################################################################
 
 def normalize_flow_to_unitless(
     flow_residual: torch.Tensor,
@@ -379,6 +383,11 @@ def compute_normalized_depth_error_unidirectional(
     return e_z, valid, Zs, dz_rel, dz_rel_p
 
 
+
+
+#Coeur de l'algooo
+
+#####################################################################################################
 @torch.no_grad()
 def compute_normalized_depth_error_bidirectional(
     depth_src_hw1, K_src, E_src, depth_tgt_hw1, K_tgt, E_tgt, *, align_corners=True, occ_rel_thresh=0.02
@@ -388,38 +397,61 @@ def compute_normalized_depth_error_bidirectional(
     Ht, Wt = depth_tgt_hw1.shape[:2]
     eps = 1e-6
 
+    # Profondeur source Z_s, forcée à être strictement positive pour éviter
+    # les divisions par zéro pendant la reprojection.
     Zs = depth_src_hw1[..., 0].float().clamp(min=eps)
+
+    # Grille de pixels de l'image source au format homogène [x, y, 1].
     ys, xs = torch.meshgrid(
         torch.arange(H, device=device, dtype=torch.float32), 
         torch.arange(W, device=device, dtype=torch.float32), 
         indexing='ij'
     )
     pix_s = torch.stack([xs, ys, torch.ones_like(xs)], dim=-1).reshape(-1, 3).T
-    Xs = (torch.inverse(K_src.float()) @ pix_s) * Zs.reshape(1, -1)
 
+    # Backprojection des pixels source en coordonnées 3D dans la caméra source :
+    # X_s = K_src^-1 * p_s * Z_s
+    Xs = (torch.inverse(K_src.float()) @ pix_s) * Zs.reshape(1, -1) #tel que K_src est la matrice de calibration de la caméra source, p_s est le pixel homogène et Z_s est la profondeur du pixel dans la caméra source.
+
+    # Décomposition des poses caméra source et cible.
     Rs, ts = E_src[:3, :3].float(), E_src[:3, 3].float()
     Rt, tt = E_tgt[:3, :3].float(), E_tgt[:3, 3].float()
+
+    # Transformations relatives source->cible et cible->source.
     R_ts = Rt @ Rs.T
     t_ts = tt - Rt @ Rs.T @ ts
     R_st = Rs @ Rt.T
     t_st = ts - Rs @ Rt.T @ tt
 
+    # Reprojection des points 3D source dans le repère caméra cible.
     Xt = (R_ts @ Xs) + t_ts[:, None]
     Zt_pred = Xt[2, :].clamp(min=eps)
     
+    # Projection perspective dans le plan image cible.
     u_t = K_tgt[0, 0] * (Xt[0, :] / Zt_pred) + K_tgt[0, 2]
     v_t = K_tgt[1, 1] * (Xt[1, :] / Zt_pred) + K_tgt[1, 2]
 
+    # Vérifie que les pixels reprojetés tombent bien dans l'image cible.
     inside = (u_t >= 0) & (u_t <= (Wt - 1)) & (v_t >= 0) & (v_t <= (Ht - 1))
     base_valid = (inside & torch.isfinite(Zt_pred)).reshape(H, W)
 
+    # Conversion en coordonnées normalisées [-1, 1] pour pouvoir échantillonner
+    # la depth cible avec grid_sample aux positions reprojetées.
     grid = torch.stack([(u_t/(Wt-1))*2-1, (v_t/(Ht-1))*2-1], dim=-1).reshape(1, H, W, 2)
     D_smpl = F.grid_sample(depth_tgt_hw1.permute(2, 0, 1).float().unsqueeze(0), grid, align_corners=align_corners)[0, 0]
 
+    # Erreur de profondeur entre la profondeur cible observée et la profondeur
+    # prédite après reprojection depuis la source.
     e_z = (D_smpl - Zt_pred.reshape(H,W)).abs() / Zs
     dz_rel = (Zt_pred.reshape(H,W) - D_smpl) / Zs
+
+    # Masque de visibilité source->cible :
+    # on conserve les points valides, avec profondeur cible disponible, et non
+    # considérés comme occultés au-delà du seuil relatif.
     mask_s2t = base_valid & torch.isfinite(D_smpl) & (D_smpl>0) & (torch.clamp(dz_rel, min=0) <= occ_rel_thresh)
 
+    # Même logique dans le sens inverse : on part de la depth cible et on
+    # reprojette les points vers la vue source.
     Zt = depth_tgt_hw1[..., 0].float().clamp(min=eps)
     yt, xt = torch.meshgrid(
         torch.arange(Ht, device=device, dtype=torch.float32), 
@@ -433,17 +465,28 @@ def compute_normalized_depth_error_bidirectional(
     u_s = K_src[0, 0] * (Xs_from_t[0, :] / Zs_from_t) + K_src[0, 2]
     v_s = K_src[1, 1] * (Xs_from_t[1, :] / Zs_from_t) + K_src[1, 2]
     
+    # Vérifie que la reprojection inverse reste bien dans l'image source.
     inside_t2s = (u_s >= 0) & (u_s <= (W - 1)) & (v_s >= 0) & (v_s <= (H - 1))
     base_valid_t2s = (inside_t2s & torch.isfinite(Zs_from_t)).reshape(Ht, Wt)
     
+    # Échantillonne la depth source aux positions obtenues par reprojection
+    # inverse afin de détecter les incohérences de visibilité.
     grid_t2s = torch.stack([(u_s/(W-1))*2-1, (v_s/(H-1))*2-1], dim=-1).reshape(1, Ht, Wt, 2)
     D_src_smpl = F.grid_sample(depth_src_hw1.permute(2, 0, 1).float().unsqueeze(0), grid_t2s, align_corners=align_corners)[0, 0]
     dz_rel_t2s = (Zs_from_t.reshape(Ht, Wt) - D_src_smpl) / Zt
     mask_t2s_vis_tgrid = base_valid_t2s & torch.isfinite(D_src_smpl) & (D_src_smpl>0) & (torch.clamp(dz_rel_t2s, min=0) <= occ_rel_thresh)
+
+    # Ramène le masque cible->source dans la grille source initiale, pour ne
+    # garder que les points mutuellement visibles dans les deux sens.
     mask_t2s = F.grid_sample(mask_t2s_vis_tgrid.float()[None,None], grid, mode='nearest', align_corners=align_corners)[0, 0] > 0.5
 
+    # Masque final : cohérence géométrique et visibilité validées dans les deux sens.
     valid = mask_s2t & mask_t2s
     return e_z, valid, Zs, dz_rel, torch.clamp(dz_rel, min=0)
+
+#####################################################################################################
+
+
 
 # -----------------------------------------------------------------------------
 # 3. BENCHMARK EVAL HELPER FUNCTIONS

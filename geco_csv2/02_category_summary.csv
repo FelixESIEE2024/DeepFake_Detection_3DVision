@@ -1,2 +1,0 @@
-model_key,category,n_clips,n_valid_clips,n_windows,n_frames,motion_mean,depth_mean,fused_mean
-Gen_CogVideoX_2b,object_centric_prompts,2,2,4,16,0.038306,0.104867,0.097103

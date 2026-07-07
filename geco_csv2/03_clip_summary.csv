@@ -1,3 +1,0 @@
-model_key,category,clip_id,raw_frames,sampled_frames,n_windows,motion,depth,fused
-Gen_CogVideoX_2b,object_centric_prompts,a1_0,49,8,2,0.038259,0.131804,0.121644
-Gen_CogVideoX_2b,object_centric_prompts,a2_0,49,8,2,0.038353,0.077929,0.072562
