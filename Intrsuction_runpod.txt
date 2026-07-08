@@ -1,0 +1,7 @@
+pip uninstall torch torchvision torchaudio
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+.\env\Scripts\python -m pip install "matplotlib<3.11"
+
+
+python demo_detection.py --frame_path examples/deform_house --outdir examples/results2

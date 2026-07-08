@@ -1,0 +1,3 @@
+model_key,category,clip_id,raw_frames,sampled_frames,n_windows,pair_comparisons,motion,depth,fused
+Gen_CogVideoX_2b,object_centric_prompts,a6_3,24,6,2,4,0.001766,0.012054,0.006926
+Gen_CogVideoX_2b,object_centric_prompts,a6_3_deform,24,6,2,4,0.004030,0.011425,0.007728

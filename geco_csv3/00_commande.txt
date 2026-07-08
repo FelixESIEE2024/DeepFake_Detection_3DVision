@@ -1,0 +1,1 @@
+python C:\Users\conqu\Videos\Detection_Deep_Fake\final_Implentation\GeCo\GeCo-Eval_evaluation.py --frames_root C:\Users\conqu\Videos\Detection_Deep_Fake\final_Implentation\GeCo\Geco-Eval --models Gen_CogVideoX_2b --categories object_centric_prompts --win_sec 1000 --max_windows 1 --output_dir .\geco_csv3 --save_frame_details --sans_slice --eval_fps 1000

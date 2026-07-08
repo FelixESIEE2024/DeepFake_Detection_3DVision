@@ -1,0 +1,13 @@
+model_key,category,clip_id,window_idx,frame_idx_in_window,frame_name,motion,depth,fused
+Gen_CogVideoX_2b,object_centric_prompts,a6_3,1,0,frame_000011.png,,,
+Gen_CogVideoX_2b,object_centric_prompts,a6_3,1,1,frame_000016.png,0.001668,0.010149,0.005923
+Gen_CogVideoX_2b,object_centric_prompts,a6_3,1,2,frame_000022.png,0.001265,0.010565,0.005938
+Gen_CogVideoX_2b,object_centric_prompts,a6_3,2,0,frame_000019.png,,,
+Gen_CogVideoX_2b,object_centric_prompts,a6_3,2,1,frame_000024.png,0.002944,0.015591,0.009269
+Gen_CogVideoX_2b,object_centric_prompts,a6_3,2,2,frame_000030.png,0.001187,0.011910,0.006576
+Gen_CogVideoX_2b,object_centric_prompts,a6_3_deform,1,0,frame_00011.png,,,
+Gen_CogVideoX_2b,object_centric_prompts,a6_3_deform,1,1,frame_00016.png,0.003376,0.007793,0.005584
+Gen_CogVideoX_2b,object_centric_prompts,a6_3_deform,1,2,frame_00022.png,0.003471,0.010056,0.006764
+Gen_CogVideoX_2b,object_centric_prompts,a6_3_deform,2,0,frame_00019.png,,,
+Gen_CogVideoX_2b,object_centric_prompts,a6_3_deform,2,1,frame_00024.png,0.004767,0.008489,0.006628
+Gen_CogVideoX_2b,object_centric_prompts,a6_3_deform,2,2,frame_00030.png,0.004505,0.019362,0.011938

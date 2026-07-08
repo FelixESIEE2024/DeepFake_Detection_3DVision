@@ -132,14 +132,20 @@ def plan_video_sampling(video_dir, model_key, args):
     )
 
     step = max(1, int(args.pair_stride))
+    total_source_iterations = 0
     total_pair_comparisons = 0
     for w in windows:
         n = len(w)
-        sampled_targets = len(range(0, n, step))
-        total_pair_comparisons += sum(
-            sampled_targets - (1 if (src % step == 0) else 0)
-            for src in range(n)
-        )
+        if args.sans_slice:
+            total_source_iterations += max(0, n - 1)
+            total_pair_comparisons += max(0, n - 1)
+        else:
+            total_source_iterations += n
+            sampled_targets = len(range(0, n, step))
+            total_pair_comparisons += sum(
+                sampled_targets - (1 if (src % step == 0) else 0)
+                for src in range(n)
+            )
 
     return {
         "all_files": all_files,
@@ -148,6 +154,7 @@ def plan_video_sampling(video_dir, model_key, args):
         "windows": windows,
         "window_lengths": [len(w) for w in windows],
         "total_sampled_frames": int(sum(len(w) for w in windows)),
+        "total_source_iterations": int(total_source_iterations),
         "n_windows": len(windows),
         "total_pair_comparisons": int(total_pair_comparisons),
         "win_sec_eff": win_sec_eff,
@@ -158,6 +165,7 @@ def print_run_configuration(args, model_keys, suffixes, tasks, task_plans, devic
     total_raw_frames = sum(len(plan["all_files"]) for plan in task_plans.values())
     total_windows = sum(plan["n_windows"] for plan in task_plans.values())
     total_sampled_frames = sum(plan["total_sampled_frames"] for plan in task_plans.values())
+    total_source_iterations = sum(plan["total_source_iterations"] for plan in task_plans.values())
     total_pair_comparisons = sum(plan["total_pair_comparisons"] for plan in task_plans.values())
 
     print("\n" + "=" * 80)
@@ -180,7 +188,8 @@ def print_run_configuration(args, model_keys, suffixes, tasks, task_plans, devic
     print("Planned workload")
     print(f"  nb de videos            : {len(tasks)}")
     print(f"  nb de windows en tout  : {total_windows}")
-    print(f"  nb d'iteration total   : {total_sampled_frames}")
+    print(f"  nb de frames echantillonnees total : {total_sampled_frames}")
+    print(f"  nb d'iteration total   : {total_source_iterations}")
     print(f"  nb comparaison source target total : {total_pair_comparisons}")
     print("=" * 80 + "\n")
 
@@ -191,6 +200,7 @@ def print_clip_header(clip_idx, total_clips, model_key, cat, clip_id, clip_plan)
     print(
         f"raw={len(clip_plan['all_files'])}  "
         f"sampled={clip_plan['total_sampled_frames']}  "
+        f"iterations={clip_plan['total_source_iterations']}  "
         f"windows={clip_plan['n_windows']}  "
         f"comparaisons_src_tgt={clip_plan['total_pair_comparisons']}  "
         f"native_fps={clip_plan['fps_native']:.2f}  "
@@ -273,8 +283,9 @@ def evaluate_one_window(image_files, vggt_model, ufm_model, device, compute_dtyp
     frame_rows = []
 
     step = max(1, int(args.pair_stride))
+    src_indices = range(N - 1) if args.sans_slice else range(N)
 
-    for src in range(N):
+    for src in src_indices:
         src_img = cached_imgs[src]
 
         # Accumulators
@@ -287,8 +298,12 @@ def evaluate_one_window(image_files, vggt_model, ufm_model, device, compute_dtyp
             C[src, ..., 0], percentile_val=args.conf_percentile, min_threshold=args.conf_min
         )
 
-        for tgt in range(0, N, step):
-            if tgt == src: continue
+        if args.sans_slice:
+            tgt_indices = [src + 1]
+        else:
+            tgt_indices = [tgt for tgt in range(0, N, step) if tgt != src]
+
+        for tgt in tgt_indices:
 
             tgt_img = cached_imgs[tgt]
 
@@ -389,8 +404,9 @@ def evaluate_video_folder(video_dir, model_key, vggt_model, ufm_model, device, c
     window_rows, frame_rows = [], []
     for win_idx, wfiles in enumerate(windows, start=1):
         print(f"Window {win_idx}/{len(windows)}  |  {len(wfiles)} sampled frames")
+        frame_total = max(0, len(wfiles) - 1) if args.sans_slice else len(wfiles)
         frame_pbar = tqdm(
-            total=len(wfiles),
+            total=frame_total,
             desc="Frames",
             unit="frame",
             leave=True,
@@ -471,6 +487,8 @@ def parse_args():
 
     # Algorithm
     p.add_argument("--pair_stride", type=int, default=1, help="Stride for pair comparison within window.")
+    p.add_argument("--sans_slice", action="store_true",
+                   help="Keep windowing but disable multi-pair sampling inside each window; only compare consecutive pairs i -> i+1.")
     p.add_argument("--covis_thresh", type=float, default=0.5, help="Flow covisibility threshold.")
     p.add_argument("--conf_percentile", type=float, default=20.0, help="Depth confidence percentile.")
     p.add_argument("--conf_min", type=float, default=0.2, help="Depth confidence min.")
